@@ -1,0 +1,242 @@
+---
+title: "Homework #3 technical component"
+format:
+  html:
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The CDC Social Vulnerability Index (SVI) takes multiple differen population-level inputs (e.g., % of the population living in poverty, % of the population without health insurance) to identify particularly vulnerable counties.
+While the CDC SVI scores rely on adding up the percentiles of various characteristics, there are alternative indexes (e.g., [University of South Carolina SoVI index](https://sc.edu/study/colleges_schools/artsandsciences/centers_and_institutes/hvri/data_and_resources/sovi/index.php)) that use methods like PCA.
+Here, we are going to use the CDC SVI data to create an alternative index based on PCA.
+
+```{r}
+knitr::opts_knit$set(root.dir = "C:\\Users\\jgluckman\\OneDrive - RAND Corporation\\Desktop\\Machine Learning\\\\PRGS-Intro-to-ML-2025\\")
+pacman::p_load("tidyverse", "sf")
+svi <- read.csv("data\\raw\\SVI Updated.csv")
+svi_raw <- svi
+```
+
+1. The following variables are used in the SVI:
+`EP_POV150, EP_UNEMP, EP_HBURD, EP_NOHSDP, EP_UNINSUR, EP_AGE65, EP_AGE17, EP_DISABL, EP_SNGPNT, EP_LIMENG, EP_MINRTY, EP_MUNIT, EP_MOBILE, EP_CROWD, EP_NOVEH, EP_GROUPQ, EP_NOINT`
+    a. Subset the merged dataset to only include the variables above and look at the pattern of missing data.
+    Are missing observations scattered throughout the data or are entire rows or columns missing?
+```{r}
+keep <- c("EP_POV150", "EP_UNEMP", "EP_HBURD", "EP_NOHSDP", "EP_UNINSUR", "EP_AGE65", "EP_AGE17", "EP_DISABL", "EP_SNGPNT", "EP_LIMENG", "EP_MINRTY", "EP_MUNIT", "EP_MOBILE", "EP_CROWD", "EP_NOVEH", "EP_GROUPQ", "EP_NOINT")
+svi <- svi[keep]
+for(i in 1:ncol(svi)){
+    print(summary(svi[i]))
+}
+View(svi)
+```
+
+    b. PCA cannot handle missing values by default.
+    There are several options for handling missing data generally, including imputation, removing rows with missing data, or removing columns with missing data.
+    Deal with the missing data in a way that makes sense for the pattern of missing data and the goals of the analysis. Explain why you made this decision.
+    _Note: How you handle this is specific to the missing data pattern and the goals of the analysis.
+    For example, when entire rows or columns are missing, imputation may not be appropriate and dropping those rows or columns is usually the best option.
+    Conversely, if you have a general missingness pattern where missing observations are scattered throughout the data, imputation is likely the best option._
+Per my conversation with Gabe, this question was based on the completed data from Homework 2.
+```{r}
+sapply(svi, function(x) sum(is.na(x)))
+```
+
+There is still no missing data.
+
+    a. After dealing with the missing data, perform PCA on the SVI variables.
+```{r}
+pc.svi <- princomp(svi)
+loadings <- pc.svi$loadings
+loadings <- as.data.frame.table(loadings)
+loadings <- loadings %>% 
+    pivot_wider(names_from = Var2, values_from = Freq)
+cats <- loadings$Var1
+rownames(loadings) <- cats
+loadings$Var1 <- NULL
+pcnames <- NA
+for(i in 1:ncol(loadings)){
+    pcnames[i] <- paste("PC", i, sep = "")
+}
+names(loadings) <- pcnames
+rownames(loadings) <- cats
+View(loadings)
+```
+
+1. Plot the eigenvectors or loadings associated of the first three principal components.
+Make sure that the axis labels correspond to the variable names and not the indices of the variables.
+How would you interpret the first three prinicpal components?
+_Note: you can find the documentation for the SVI variables [here](https://www.atsdr.cdc.gov/placeandhealth/svi/documentation/SVI_documentation_2022.html)._
+```{r}
+print(ggplot(data = loadings) +
+geom_bar(aes(x = rownames(loadings), y = PC1), stat = "identity") +
+labs(title = "PC1: Poverty Level", x = "Interactions", y = "Loadings") +
+theme(axis.text.x = element_text(angle = 90)))
+
+print(ggplot(data = loadings) +
+geom_bar(aes(x = rownames(loadings), y = PC2), stat = "identity") +
+labs(title = "PC2: Unemployment", x = "Interactions", y = "Loadings") +
+theme(axis.text.x = element_text(angle = 90)))
+
+print(ggplot(data = loadings) +
+geom_bar(aes(x = rownames(loadings), y = PC3), stat = "identity") +
+labs(title = "PC3: Household Burden", x = "Interactions", y = "Loadings") +
+theme(axis.text.x = element_text(angle = 90)))
+```
+
+NOTE: the documentation was unavailable on the official CDC site or the Restored CDC backup from January 6, 2025 at time of completion, so translations with question marks are best guesses
+PC1 shows a strong correlation to EP_MINRTY (minority status), EP_POV150 (poverty line), EP_UNINSUR (no insurance), and EP_NOHSDP (no housing?)
+PC2 shows similar strong correlations to EP_MOBILE (mobile phone access), EP_POV150 (poverty line), EP_NOINT (no internet access), EP_DISABL (disabled), EP_MINRTY (minority status), EP_MUNIT
+PC3 shows correlations to EP_POV150 (poverty line), EP_HBURD (household burden?), EP_MOBILE (mobile phone access), EP_MUNIT, EP_NOVEH (no vehicle)
+
+
+1. People often use PCA in downstream analyses (e.g., regression).
+When doing this, they need to choose the number of principal components to use in the analysis.
+There are several different ways to determine the number of principal components to retain.
+One common method is to retain principal components that explain a certain percentage of the variance in the data.
+    a. How many principal components are needed to explain 80% of the variance in the data?
+```{r}
+sdev <- pc.svi$sdev
+props <- colSums(loadings)/(sdev^2)
+sum(abs(props))
+sum(abs(props[1:14]))
+```
+
+14 PCs for 80%
+    a. How many principal components are needed to explain 90% of the variance in the data?
+```{r}
+sum(abs(props[1:15]))
+```
+
+15 PCs, but I'm pretty sure I'm doing something wrong
+1. An alternative approach is to plot the eigenvalues of the principal components and retain the components that are above the "elbow" in the plot. In other words the eigenvalues that are substantially larger than the rest.
+    a. Create a [scree plot](https://en.wikipedia.org/wiki/Scree_plot) of the eigenvalues of the principal components.
+```{r}
+screeplot(pc.svi, main = "Scree Plot", type = "lines")
+```
+    a. How many principal components should be retained based on the scree plot? This video may help: [PCA Scree Plot](https://youtu.be/vFUvNICWVz4?si=6NbyRcLRGT8L1HzI)
+
+I would take the first 3 PCs.
+
+1. Plot the first principal component score on a map of the US counties.
+Briefly describe any spatial patterns you see.
+
+```{r}
+scores <- pc.svi$score
+scores <- data.frame(scores)
+countycomp <- cbind.data.frame(svi_raw$fips, svi_raw$STATE, scores[1])
+names(countycomp) <- c("fips", "State", "PC1")
+us <- st_read("data\\raw\\tl_2019_us_county")
+us <- st_transform(us, "NAD83")
+us$fips <- paste(as.character(as.numeric(us$STATEFP)), us$COUNTYFP, sep="")
+us <- merge(us, countycomp, by = "fips")
+table(us$STATEFP)
+us <- us[!is.na(us$State),]
+us <- us[!(us$State %in% c("Alaska", "Hawaii")),]
+print(ggplot(data = us) +
+    geom_sf(aes(fill = PC1), color = "black") +
+    labs(title = "PC1 Intensity") +
+    theme_void())
+```
+
+The SVI scores seem weighted in the southwest, at least at the scale my computer can process.
+Also, it is worth noting that I excluded all US territories, Alaska, and Hawaii from the choropleth in order to keep images visible. Connecticut is also missing as an artifact of the source of the data.
+
+1. Cross-validation is another method to determine the number of principal components to retain.
+This process requires some linear algebra that is beyond the scope of this course.
+As such, I have written example [code](https://github.com/gabehassler/PRGS-Intro-to-ML-2024/blob/main/examples/pca_cross_validation.jl) in Julia that demonstrates how to perform cross-validation.
+This procedure is a simplified versionof an approach explained in this [blog post](https://alexhwilliams.info/itsneuronalblog/2018/02/26/crossval/).
+For the purposes of this assignment, the `pca_cv_error` function is a black box that returns the cross-validation error for a given number of principal components.
+_Note: If you use a different programming language, you can use ChatGPT to translate the code to your language of choice._
+
+R as read by GitHub Copilot
+```{r}
+# Convert data to numeric matrix (ensure numeric columns)
+X <- as.matrix(svi)
+mode(X) <- "double"
+
+# Standardize columns (mean 0, sd 1)
+mu <- colMeans(X)
+sd_vec <- apply(X, 2, sd)
+
+# Avoid division by zero: if a column has sd == 0, set sd to 1 (will make standardized values 0)
+sd_vec[sd_vec == 0] <- 1
+
+X <- sweep(X, 2, mu, FUN = "-")
+X <- sweep(X, 2, sd_vec, FUN = "/")
+
+# approximates the data matrix X using the first k principal components
+# X must be standardized to have mean 0 and standard deviation 1
+pca_approx <- function(X, k) {
+  s <- svd(X)
+  U <- s$u[, seq_len(k), drop = FALSE]
+  D <- diag(s$d[seq_len(k)])
+  V <- s$v[, seq_len(k), drop = FALSE]
+  return(U %*% D %*% t(V))
+}
+
+# computes the cross-validated error of approximating X using the first k principal components
+# X must be standardized to have mean 0 and standard deviation 1
+# folds is a matrix of the same size as X with integers from 1 to n_folds
+# typically folds will have the numbers 1:n_folds randomly assigned for each element
+pca_cv_error <- function(X, k, folds) {
+  fs <- sort(unique(as.vector(folds)))
+  # column means of the original X (not the standardized? matches Julia which used mean(X, dims=1) on standardized X)
+  means <- colMeans(X)
+  errs <- numeric(length(fs))
+  
+  for (idx in seq_along(fs)) {
+    f <- fs[idx]
+    X_cv <- X
+    # replace entries belonging to fold f with column means
+    for (col in seq_len(ncol(X_cv))) {
+      rows_to_replace <- which(folds[, col] == f)
+      if (length(rows_to_replace) > 0) {
+        X_cv[rows_to_replace, col] <- means[col]
+      }
+    }
+    
+    # approximate X_cv using first k principal components
+    X_hat <- pca_approx(X_cv, k)
+    
+    # compute squared error only for replaced values
+    err <- 0
+    for (col in seq_len(ncol(X))) {
+      rows <- which(folds[, col] == f)
+      if (length(rows) > 0) {
+        diffs <- X_hat[rows, col] - X[rows, col]
+        err <- err + sum(diffs^2)
+      }
+    }
+    errs[idx] <- err
+  }
+  
+  # return the average error normalized by total number of elements (matches Julia: sum(errs) / length(X))
+  return(sum(errs) / length(X))
+}
+
+# create a matrix of random folds
+set.seed(1)  # for reproducibility
+n_folds <- 20
+folds <- matrix(sample(seq_len(n_folds), nrow(X) * ncol(X), replace = TRUE),
+                nrow = nrow(X), ncol = ncol(X))
+
+# compute the cross-validated error of approximating X using the first k principal components for k = 1:17
+k_max <- min(17, ncol(X))  # ensure we don't exceed the number of columns
+cv_errors <- sapply(1:k_max, function(k) pca_cv_error(X, 17, folds))
+
+# what is the optimal number of principal components to use?
+optimal_k <- which.min(cv_errors)
+
+cat("Cross-validated errors for k = 1:", k_max, "\n")
+print(cv_errors)
+cat(sprintf("Optimal k (min CV error): %d\n", optimal_k))
+```
+
+    a. Compute the cross-validation error for 1 to 17 principal components. If this process is parallelizable, parallelize the code. If setting a random number seed would make this work more reproducible, set a random number seed.
+
+
+    a. How many principal components should be retained based on the cross-validation error?
+The provided code prints out a value of 1, but every error value comes out as 0.999681. I did have to manually adjust the k input in cv_errors, and these answers are for a value of 17, the total number of PCs involved.
